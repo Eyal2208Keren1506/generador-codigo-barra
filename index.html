@@ -65,6 +65,17 @@
     font-size:16px; cursor:pointer; padding:0 4px; line-height:1;
   }
   .etiqueta .quitar:hover{color:var(--rojo);}
+  .etiqueta .copiar{
+    position:absolute; top:2px; left:4px; background:none; border:none; color:#bbb;
+    font-size:13px; cursor:pointer; padding:0 4px; line-height:1;
+  }
+  .etiqueta .copiar:hover{color:var(--azul);}
+  #toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    background:#323232; color:#fff; padding:12px 20px; border-radius:8px;
+    font-size:14px; opacity:0; pointer-events:none; transition:opacity .2s; z-index:999;
+  }
+  #toast.show{opacity:1;}
   .vacio{text-align:center; color:#999; padding:30px; font-size:14px;}
   svg{display:block; margin:0 auto;}
   .hint{font-size:12px; color:#777; margin-top:8px;}
@@ -108,8 +119,14 @@
 
   <!-- PREVIEW -->
   <div class="panel no-print">
-    <label>Vista previa</label>
-    <div class="preview" id="preview">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <label style="margin:0;">Vista previa</label>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-azul" onclick="copiarActual()">📋 Copiar barra (Excel)</button>
+        <button class="btn-gris" onclick="descargarActual()">⬇️ Descargar PNG</button>
+      </div>
+    </div>
+    <div class="preview" id="preview" style="margin-top:10px;">
       <div class="vacio">La barra aparecerá aquí.</div>
     </div>
   </div>
@@ -271,12 +288,69 @@ function renderHoja(){
   hoja.style.gridTemplateColumns=`repeat(${cols},1fr)`;
   hoja.innerHTML = lista.map((it,idx)=>{
     const nom = (verNom && it.nombre) ? `<div class="nom">${escapeHtml(it.nombre)}</div>` : '';
-    return `<div class="etiqueta"><button class="quitar no-print" onclick="quitar(${idx})" title="Quitar">×</button>${nom}${svgEAN13(it.codigo13, mw)}</div>`;
+    return `<div class="etiqueta"><button class="copiar no-print" onclick="copiarLabel(${idx})" title="Copiar barra para Excel">📋</button><button class="quitar no-print" onclick="quitar(${idx})" title="Quitar">×</button>${nom}${svgEAN13(it.codigo13, mw)}</div>`;
   }).join('');
 }
 
 function quitar(i){ lista.splice(i,1); renderHoja(); }
 function limpiarHoja(){ if(lista.length && confirm('¿Vaciar toda la hoja?')){ lista=[]; renderHoja(); } }
+
+// ===== Copiar / descargar la barra como imagen (para Excel) =====
+function svgAPng(svgString, escala){
+  return new Promise((res,rej)=>{
+    const img=new Image();
+    const svgBlob=new Blob([svgString],{type:'image/svg+xml;charset=utf-8'});
+    const url=URL.createObjectURL(svgBlob);
+    img.onload=()=>{
+      const w=Math.round(img.width*escala), h=Math.round(img.height*escala);
+      const canvas=document.createElement('canvas');
+      canvas.width=w; canvas.height=h;
+      const ctx=canvas.getContext('2d');
+      ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
+      ctx.imageSmoothingEnabled=false;
+      ctx.drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(b=> b?res(b):rej(new Error('toBlob falló')),'image/png');
+    };
+    img.onerror=e=>{ URL.revokeObjectURL(url); rej(new Error('no se pudo renderizar la imagen')); };
+    img.src=url;
+  });
+}
+
+async function copiarSVG(svgString){
+  const blob = await svgAPng(svgString, 4);
+  if(!(navigator.clipboard && window.ClipboardItem)) throw new Error('clipboard no disponible');
+  await navigator.clipboard.write([ new ClipboardItem({'image/png': blob}) ]);
+}
+
+function toast(texto){
+  let t=document.getElementById('toast');
+  if(!t){ t=document.createElement('div'); t.id='toast'; document.body.appendChild(t); }
+  t.textContent=texto; t.classList.add('show');
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2000);
+}
+
+async function copiarActual(){
+  if(!actual){ mostrarMsg('Primero genera una barra (botón “Generar barra”).','warn'); return; }
+  try{ await copiarSVG(svgEAN13(actual.codigo13, 2.6)); mostrarMsg('📋 Barra copiada. Pégala en Excel con ⌘V.','ok'); }
+  catch(e){ mostrarMsg('No se pudo copiar al portapapeles. Usa “Descargar PNG” e inserta la imagen en Excel (Insertar ▸ Imagen).','err'); }
+}
+
+async function copiarLabel(i){
+  try{ await copiarSVG(svgEAN13(lista[i].codigo13, 2.6)); toast('📋 Barra copiada — pégala en Excel (⌘V)'); }
+  catch(e){ toast('No se pudo copiar. Usa Descargar PNG.'); }
+}
+
+async function descargarActual(){
+  if(!actual){ mostrarMsg('Primero genera una barra.','warn'); return; }
+  try{
+    const blob=await svgAPng(svgEAN13(actual.codigo13, 2.6), 4);
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=actual.codigo13+'.png';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+  }catch(e){ mostrarMsg('No se pudo generar el PNG.','err'); }
+}
 
 function escapeHtml(s){ return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
