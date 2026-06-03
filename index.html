@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generador de Código de Barra · EAN-13</title>
+<style>
+  :root{
+    --azul:#1565c0; --azul-osc:#0d47a1; --gris:#f4f6f8; --borde:#d0d7de;
+    --verde:#2e7d32; --rojo:#c62828; --naranja:#ef6c00;
+  }
+  *{box-sizing:border-box;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    margin:0; background:var(--gris); color:#1a1a1a;
+  }
+  header{
+    background:linear-gradient(135deg,var(--azul-osc),var(--azul));
+    color:#fff; padding:18px 24px;
+  }
+  header h1{margin:0; font-size:20px; font-weight:600;}
+  header p{margin:4px 0 0; font-size:13px; opacity:.9;}
+  .wrap{max-width:1000px; margin:0 auto; padding:20px;}
+  .panel{
+    background:#fff; border:1px solid var(--borde); border-radius:12px;
+    padding:20px; margin-bottom:18px; box-shadow:0 1px 3px rgba(0,0,0,.05);
+  }
+  .row{display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;}
+  .campo{flex:1; min-width:180px;}
+  label{display:block; font-size:12px; font-weight:600; color:#444; margin-bottom:6px; text-transform:uppercase; letter-spacing:.03em;}
+  input[type=text]{
+    width:100%; padding:12px 14px; font-size:18px; border:1.5px solid var(--borde);
+    border-radius:8px; font-family:"SF Mono",Menlo,monospace; letter-spacing:2px;
+  }
+  input[type=text].nombre{font-family:inherit; font-size:15px; letter-spacing:0;}
+  input:focus{outline:none; border-color:var(--azul); box-shadow:0 0 0 3px rgba(21,101,192,.15);}
+  button{
+    padding:12px 20px; font-size:15px; font-weight:600; border:none; border-radius:8px;
+    cursor:pointer; transition:filter .15s;
+  }
+  button:hover{filter:brightness(1.08);}
+  .btn-azul{background:var(--azul); color:#fff;}
+  .btn-verde{background:var(--verde); color:#fff;}
+  .btn-gris{background:#e3e7eb; color:#333;}
+  .btn-rojo{background:#fff; color:var(--rojo); border:1.5px solid var(--rojo);}
+  .msg{margin-top:12px; font-size:14px; padding:10px 14px; border-radius:8px; display:none;}
+  .msg.ok{background:#e8f5e9; color:var(--verde); display:block;}
+  .msg.warn{background:#fff3e0; color:var(--naranja); display:block;}
+  .msg.err{background:#ffebee; color:var(--rojo); display:block;}
+  .preview{text-align:center; padding:20px; background:#fff; border:1px dashed var(--borde); border-radius:10px;}
+  .controles{display:flex; gap:18px; flex-wrap:wrap; align-items:center; margin-top:6px;}
+  .controles .campo{min-width:auto; flex:none;}
+  select,input[type=number]{padding:8px 10px; font-size:14px; border:1.5px solid var(--borde); border-radius:7px;}
+  .hoja-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;}
+  .hoja-head h2{margin:0; font-size:16px;}
+  #hoja{display:grid; gap:8px;}
+  .etiqueta{
+    border:1px solid #e0e0e0; border-radius:6px; padding:8px 6px; text-align:center;
+    position:relative; background:#fff; break-inside:avoid; page-break-inside:avoid;
+  }
+  .etiqueta .nom{font-size:11px; font-weight:600; margin-bottom:2px; line-height:1.2;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .etiqueta .quitar{
+    position:absolute; top:2px; right:4px; background:none; border:none; color:#bbb;
+    font-size:16px; cursor:pointer; padding:0 4px; line-height:1;
+  }
+  .etiqueta .quitar:hover{color:var(--rojo);}
+  .vacio{text-align:center; color:#999; padding:30px; font-size:14px;}
+  svg{display:block; margin:0 auto;}
+  .hint{font-size:12px; color:#777; margin-top:8px;}
+
+  @media print{
+    body{background:#fff;}
+    header,.no-print{display:none !important;}
+    .wrap{max-width:none; padding:0;}
+    .panel{border:none; box-shadow:none; padding:0; margin:0;}
+    .etiqueta{border:1px solid #ccc;}
+    #hoja{gap:4px;}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏷️ Generador de Código de Barra — EAN-13</h1>
+  <p>Mete un código de 13 dígitos y obtén la barra escaneable. Imprime o guarda como PDF.</p>
+</header>
+
+<div class="wrap">
+
+  <!-- ENTRADA -->
+  <div class="panel no-print">
+    <div class="row">
+      <div class="campo" style="flex:2;">
+        <label>Código (13 dígitos · o 12 y se calcula el verificador)</label>
+        <input type="text" id="codigo" maxlength="14" inputmode="numeric" placeholder="7400000000000" autofocus>
+      </div>
+      <div class="campo" style="flex:2;">
+        <label>Nombre / descripción (opcional)</label>
+        <input type="text" id="nombre" class="nombre" placeholder="Ej. Hebilla negra mediana">
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px;">
+      <button class="btn-azul" onclick="generar()">Generar barra</button>
+      <button class="btn-verde" onclick="agregarHoja()">➕ Agregar a la hoja</button>
+    </div>
+    <div id="msg" class="msg"></div>
+  </div>
+
+  <!-- PREVIEW -->
+  <div class="panel no-print">
+    <label>Vista previa</label>
+    <div class="preview" id="preview">
+      <div class="vacio">La barra aparecerá aquí.</div>
+    </div>
+  </div>
+
+  <!-- HOJA DE IMPRESIÓN -->
+  <div class="panel">
+    <div class="hoja-head no-print">
+      <h2>Hoja de etiquetas (<span id="contador">0</span>)</h2>
+      <div style="display:flex; gap:10px;">
+        <button class="btn-gris" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+        <button class="btn-rojo" onclick="limpiarHoja()">Vaciar hoja</button>
+      </div>
+    </div>
+    <div class="controles no-print">
+      <div class="campo">
+        <label>Tamaño</label>
+        <select id="tam" onchange="renderHoja()">
+          <option value="1.4">Pequeño</option>
+          <option value="1.8" selected>Mediano</option>
+          <option value="2.4">Grande</option>
+        </select>
+      </div>
+      <div class="campo">
+        <label>Columnas</label>
+        <input type="number" id="cols" value="3" min="1" max="8" style="width:70px;" onchange="renderHoja()">
+      </div>
+      <div class="campo" style="align-self:flex-end;">
+        <label><input type="checkbox" id="verNombre" checked onchange="renderHoja()" style="vertical-align:middle;"> Mostrar nombre</label>
+      </div>
+    </div>
+    <div id="hoja"><div class="vacio">Aún no has agregado etiquetas. Genera una barra y pulsa “Agregar a la hoja”.</div></div>
+    <p class="hint no-print">Para PDF: pulsa “Imprimir”, y en el diálogo elige <b>“Guardar como PDF”</b> (o PDF en el menú inferior izquierdo en Mac).</p>
+  </div>
+
+</div>
+
+<script>
+// ===== Codificación EAN-13 =====
+const L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
+const G = ['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111'];
+const R = ['1110010','1100110','1101100','1000010','1011100','1001110','1010000','1000100','1001000','1110100'];
+const PARIDAD = ['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
+
+function digitoVerificador(d12){
+  let s=0;
+  for(let i=0;i<12;i++){ s += (+d12[i]) * (i%2===0?1:3); }
+  return (10 - (s%10))%10;
+}
+
+// Devuelve {ok, codigo13, error} normalizando la entrada
+function normalizar(entrada){
+  const d = (entrada||'').replace(/\D/g,'');
+  if(d.length===12){
+    const c = digitoVerificador(d);
+    return {ok:true, codigo13:d+c, nota:'Se calculó el dígito verificador ('+c+').'};
+  }
+  if(d.length===13){
+    const c = digitoVerificador(d.slice(0,12));
+    if(c !== +d[12]){
+      return {ok:true, codigo13:d, warn:'⚠️ El dígito verificador no coincide (debería ser '+c+'). La barra se genera igual, pero verifica el número.'};
+    }
+    return {ok:true, codigo13:d};
+  }
+  return {ok:false, error:'Mete 12 o 13 dígitos. Tienes '+d.length+'.'};
+}
+
+// Construye el SVG de la barra para un código de 13 dígitos válido
+function svgEAN13(codigo13, moduloPx){
+  const mw = moduloPx;
+  const d = codigo13.split('').map(Number);
+  const primer = d[0];
+  const pat = PARIDAD[primer];
+  let bits = '101'; // guarda inicio
+  for(let i=0;i<6;i++){
+    const dig = d[1+i];
+    bits += (pat[i]==='L'?L:G)[dig];
+  }
+  bits += '01010'; // guarda central
+  for(let i=0;i<6;i++){ bits += R[d[7+i]]; }
+  bits += '101'; // guarda fin
+
+  const qzL=11, qzR=7;
+  const totalMod = qzL + bits.length + qzR;          // 11+95+7 = 113
+  const altBarra = Math.round(mw*68);                 // alto de barras de datos
+  const extra = Math.round(mw*9);                     // las guardas bajan más
+  const margenTexto = Math.round(mw*11);
+  const W = totalMod*mw;
+  const H = altBarra + extra + margenTexto;
+  const guardas = new Set();
+  [0,1,2,45,46,47,48,49,92,93,94].forEach(i=>guardas.add(i));
+
+  let rects='';
+  for(let i=0;i<bits.length;i++){
+    if(bits[i]==='1'){
+      const x=(qzL+i)*mw;
+      const h=altBarra + (guardas.has(i)?extra:0);
+      rects += `<rect x="${x}" y="0" width="${mw}" height="${h}" fill="#000"/>`;
+    }
+  }
+
+  const fs = Math.round(mw*11);
+  const ty = altBarra + extra + Math.round(mw*9);
+  // posiciones de texto (en módulos -> px)
+  const xPrimer = (qzL - 5)*mw;
+  function cx(modCentro){ return (qzL + modCentro)*mw; }
+  let txt = `<text x="${xPrimer}" y="${ty}" font-family="monospace" font-size="${fs}" text-anchor="middle">${d[0]}</text>`;
+  // izquierda: módulos de datos 3..44, 6 dígitos de 7 módulos
+  for(let k=0;k<6;k++){
+    txt += `<text x="${cx(3+7*k+3.5)}" y="${ty}" font-family="monospace" font-size="${fs}" text-anchor="middle">${d[1+k]}</text>`;
+  }
+  // derecha: módulos 50..91
+  for(let k=0;k<6;k++){
+    txt += `<text x="${cx(50+7*k+3.5)}" y="${ty}" font-family="monospace" font-size="${fs}" text-anchor="middle">${d[7+k]}</text>`;
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#fff"/>${rects}${txt}</svg>`;
+}
+
+// ===== UI =====
+let actual = null; // {codigo13, nombre}
+const $ = id => document.getElementById(id);
+
+function mostrarMsg(texto, tipo){
+  const m=$('msg'); m.textContent=texto; m.className='msg '+tipo;
+  if(!texto) m.className='msg';
+}
+
+function generar(){
+  const r = normalizar($('codigo').value);
+  if(!r.ok){ mostrarMsg(r.error,'err'); $('preview').innerHTML='<div class="vacio">Corrige el código.</div>'; actual=null; return; }
+  actual = {codigo13:r.codigo13, nombre:$('nombre').value.trim()};
+  $('preview').innerHTML = svgEAN13(r.codigo13, 2.4);
+  if(r.warn) mostrarMsg(r.warn,'warn');
+  else if(r.nota) mostrarMsg('✅ '+r.codigo13+' — '+r.nota,'ok');
+  else mostrarMsg('✅ Código válido: '+r.codigo13,'ok');
+}
+
+let lista = [];
+function agregarHoja(){
+  generar();
+  if(!actual) return;
+  lista.push({...actual});
+  renderHoja();
+  // limpiar para el siguiente
+  $('codigo').value=''; $('nombre').value=''; $('codigo').focus();
+}
+
+function renderHoja(){
+  const hoja=$('hoja');
+  $('contador').textContent=lista.length;
+  if(lista.length===0){
+    hoja.innerHTML='<div class="vacio">Aún no has agregado etiquetas. Genera una barra y pulsa “Agregar a la hoja”.</div>';
+    hoja.style.gridTemplateColumns='';
+    return;
+  }
+  const mw = parseFloat($('tam').value);
+  const cols = Math.max(1, Math.min(8, +$('cols').value||3));
+  const verNom = $('verNombre').checked;
+  hoja.style.gridTemplateColumns=`repeat(${cols},1fr)`;
+  hoja.innerHTML = lista.map((it,idx)=>{
+    const nom = (verNom && it.nombre) ? `<div class="nom">${escapeHtml(it.nombre)}</div>` : '';
+    return `<div class="etiqueta"><button class="quitar no-print" onclick="quitar(${idx})" title="Quitar">×</button>${nom}${svgEAN13(it.codigo13, mw)}</div>`;
+  }).join('');
+}
+
+function quitar(i){ lista.splice(i,1); renderHoja(); }
+function limpiarHoja(){ if(lista.length && confirm('¿Vaciar toda la hoja?')){ lista=[]; renderHoja(); } }
+
+function escapeHtml(s){ return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// Enter para generar / agregar
+$('codigo').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.shiftKey?agregarHoja():generar(); }});
+$('nombre').addEventListener('keydown', e=>{ if(e.key==='Enter'){ agregarHoja(); }});
+// Solo dígitos en el código
+$('codigo').addEventListener('input', e=>{ e.target.value=e.target.value.replace(/\D/g,''); });
+</script>
+</body>
+</html>
