@@ -158,10 +158,10 @@
       <div class="campo">
         <label>Posición de la foto</label>
         <select id="fotoPos" onchange="redibujar()">
-          <option value="arriba" selected>Arriba</option>
+          <option value="arriba">Arriba</option>
           <option value="abajo">Abajo</option>
           <option value="izquierda">Izquierda</option>
-          <option value="derecha">Derecha</option>
+          <option value="derecha" selected>Derecha</option>
         </select>
       </div>
       <div class="campo">
@@ -201,6 +201,10 @@
       <div class="campo">
         <label>Columnas</label>
         <input type="number" id="cols" value="3" min="1" max="8" style="width:70px;" onchange="renderHoja()">
+      </div>
+      <div class="campo">
+        <label>Tamaño de la hoja · <span id="vHoja">100</span>%</label>
+        <input type="range" id="hojaZoom" min="40" max="200" value="100" oninput="$('vHoja').textContent=this.value; aplicarZoomHoja()">
       </div>
       <div class="campo" style="align-self:flex-end;">
         <label><input type="checkbox" id="verNombre" checked onchange="renderHoja()" style="vertical-align:middle;"> Mostrar nombre</label>
@@ -354,6 +358,11 @@ function renderHoja(){
     const cuerpo = it.pngURL ? `<img src="${it.pngURL}" style="width:100%; display:block;">` : svgEAN13(it.codigo13, mw);
     return `<div class="etiqueta"><button class="copiar no-print" onclick="copiarLabel(${idx})" title="Copiar para Excel">📋</button><button class="quitar no-print" onclick="quitar(${idx})" title="Quitar">×</button>${nom}${cuerpo}</div>`;
   }).join('');
+  aplicarZoomHoja();
+}
+function aplicarZoomHoja(){
+  const h=$('hoja'), z=$('hojaZoom');
+  if(h && z) h.style.zoom = (parseInt(z.value,10)||100)/100;
 }
 
 function quitar(i){ lista.splice(i,1); renderHoja(); }
@@ -461,7 +470,7 @@ function envolver(ctx, txt, maxW){
 function opts(){
   const g=(id,d)=> ($(id)? $(id).value : d);
   return {
-    pos: g('fotoPos','arriba'),
+    pos: g('fotoPos','derecha'),
     txt: parseInt(g('txtSize',12),10),
     barFrac: parseInt(g('barSize',85),10)/100,
     barAlto: parseInt(g('barAlto',45),10)
@@ -511,24 +520,26 @@ async function componer(codigo13, nombre, fotoImg){
     if(o.pos==='abajo'){ dBar(); y+=gap; dFoto(); } else { dFoto(); dBar(); }
     return canvas;
   } else {
-    // Lado a lado (foto a la izquierda o derecha)
-    const photoMax=150, contentW=200, colGap=12;
+    // Lado a lado: la descripción va de TÍTULO a todo el ancho arriba (puede pasar sobre la foto);
+    // abajo, foto y barra en dos columnas.
+    const photoMax=150, barColW=200, colGap=12;
     let fW=0,fH=0;
     if(fotoImg){ const iw=fotoImg.naturalWidth||fotoImg.width, ih=fotoImg.naturalHeight||fotoImg.height; const s=Math.min(photoMax/iw, photoMax/ih); fW=iw*s; fH=ih*s; }
-    const barW=contentW*o.barFrac, barH=barW*ratio;
-    const lineas = nombre? envolver(mctx, nombre, contentW) : [];
+    const barW=barColW*o.barFrac, barH=barW*ratio;
+    const rowH=Math.max(fH, barH);
+    const W=pad*2 + (fotoImg?fW+colGap:0) + barColW;
+    const innerW=W-2*pad;
+    const lineas = nombre? envolver(mctx, nombre, innerW) : [];   // texto usa TODO el ancho
     const nameH = lineas.length ? lineas.length*lineH + gap : 0;
-    const contentH=nameH+barH;
-    const H=pad*2+Math.max(fH, contentH);
-    const W=pad*2 + (fotoImg?fW+colGap:0) + contentW;
+    const H=pad + nameH + rowH + pad;
     const {canvas,ctx}=mkCanvas(W,H,SCALE);
-    let fx, cx0;
-    if(o.pos==='izquierda'){ fx=pad; cx0=pad+(fotoImg?fW+colGap:0); }
-    else { cx0=pad; fx=pad+contentW+colGap; }
-    if(fotoImg){ ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high'; ctx.drawImage(fotoImg,fx,(H-fH)/2,fW,fH); }
-    let cy=(H-contentH)/2;
-    if(lineas.length){ dibujarTexto(ctx, lineas, cx0+contentW/2, cy); cy+=nameH; }
-    ctx.imageSmoothingEnabled=false; ctx.drawImage(barImg, cx0+(contentW-barW)/2, cy, barW, barH);
+    let y=pad;
+    if(lineas.length){ dibujarTexto(ctx, lineas, W/2, y); y+=nameH; }
+    let fx, bx;
+    if(o.pos==='izquierda'){ fx=pad; bx=pad+(fotoImg?fW+colGap:0); }
+    else { bx=pad; fx=pad+barColW+colGap; }
+    if(fotoImg){ ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high'; ctx.drawImage(fotoImg,fx,y+(rowH-fH)/2,fW,fH); }
+    ctx.imageSmoothingEnabled=false; ctx.drawImage(barImg, bx+(barColW-barW)/2, y+(rowH-barH)/2, barW, barH);
     return canvas;
   }
 }
