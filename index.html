@@ -180,6 +180,36 @@
     <p class="hint">Estos controles aplican a la imagen con foto. “Alto de barra” bajo = barra menos alta.</p>
   </div>
 
+  <!-- MEJORAR FOTO (sin IA) -->
+  <div class="panel no-print">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <label style="margin:0;">Mejorar foto (sin IA)</label>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-azul" type="button" onclick="autoFoto()">✨ Auto</button>
+        <button class="btn-gris" type="button" onclick="resetFoto()">Restablecer</button>
+      </div>
+    </div>
+    <div class="controles" style="margin-top:8px;">
+      <div class="campo">
+        <label>Brillo · <span id="vBri">1.00</span></label>
+        <input type="range" id="fBrillo" min="0.5" max="1.6" step="0.02" value="1" oninput="$('vBri').textContent=(+this.value).toFixed(2); redibujarFoto()">
+      </div>
+      <div class="campo">
+        <label>Contraste · <span id="vCon">1.00</span></label>
+        <input type="range" id="fContraste" min="0.5" max="1.8" step="0.02" value="1" oninput="$('vCon').textContent=(+this.value).toFixed(2); redibujarFoto()">
+      </div>
+      <div class="campo">
+        <label>Saturación · <span id="vSat">1.00</span></label>
+        <input type="range" id="fSat" min="0" max="2" step="0.02" value="1" oninput="$('vSat').textContent=(+this.value).toFixed(2); redibujarFoto()">
+      </div>
+      <div class="campo">
+        <label>Nitidez · <span id="vNit">0</span></label>
+        <input type="range" id="fNitidez" min="0" max="100" step="5" value="0" oninput="$('vNit').textContent=this.value; redibujarFoto()">
+      </div>
+    </div>
+    <p class="hint">Mejora la foto en el navegador (gratis, sin IA). “Auto” aplica un realce general.</p>
+  </div>
+
   <!-- HOJA DE IMPRESIÓN -->
   <div class="panel">
     <div class="hoja-head no-print">
@@ -212,6 +242,18 @@
     </div>
     <div id="hoja"><div class="vacio">Aún no has agregado etiquetas. Genera una barra y pulsa “Agregar a la hoja”.</div></div>
     <p class="hint no-print">Para PDF: pulsa “Imprimir”, y en el diálogo elige <b>“Guardar como PDF”</b> (o PDF en el menú inferior izquierdo en Mac).</p>
+  </div>
+
+  <!-- HISTORIAL -->
+  <div class="panel no-print">
+    <div class="hoja-head">
+      <h2>Historial (<span id="contHist">0</span>)</h2>
+      <button class="btn-rojo" onclick="vaciarHist()">Vaciar historial</button>
+    </div>
+    <p class="hint">Se guardan las etiquetas que copias, descargas o agregas a la hoja. Quedan en este navegador aunque cierres la página.</p>
+    <div id="histGrid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; margin-top:10px;">
+      <div class="vacio">Aún no hay historial.</div>
+    </div>
   </div>
 
 </div>
@@ -314,8 +356,9 @@ async function generar(){
   if(!r.ok){ mostrarMsg(r.error,'err'); $('preview').innerHTML='<div class="vacio">Corrige el código.</div>'; actual=null; return null; }
   const nombre = $('nombre').value.trim();
   if(fotoActual){
-    ultimo = {codigo13:r.codigo13, nombre, fotoImg:fotoActual.img};
-    const cv = await componer(r.codigo13, nombre, fotoActual.img);
+    const foto = fotoLista();
+    ultimo = {codigo13:r.codigo13, nombre, fotoImg:foto};
+    const cv = await componer(r.codigo13, nombre, foto);
     const pngURL = cv.toDataURL('image/png');
     actual = {codigo13:r.codigo13, nombre, fotoSrc:fotoActual.src, pngURL};
     $('preview').innerHTML = `<img src="${pngURL}" style="max-width:100%;">`;
@@ -334,6 +377,7 @@ async function agregarHoja(){
   const a = await generar();
   if(!a) return;
   lista.push({codigo13:a.codigo13, nombre:a.nombre, fotoSrc:a.fotoSrc, pngURL:a.pngURL});
+  añadirHist(a);
   renderHoja();
   // limpiar para el siguiente
   $('codigo').value=''; $('nombre').value='';
@@ -344,6 +388,7 @@ async function agregarHoja(){
 function renderHoja(){
   const hoja=$('hoja');
   $('contador').textContent=lista.length;
+  guardarLista();
   if(lista.length===0){
     hoja.innerHTML='<div class="vacio">Aún no has agregado etiquetas. Genera una barra y pulsa “Agregar a la hoja”.</div>';
     hoja.style.gridTemplateColumns='';
@@ -408,6 +453,7 @@ async function copiarActual(){
   try{
     if(actual.pngURL) await copiarPNGUrl(actual.pngURL);
     else await copiarSVG(svgEAN13(actual.codigo13, 2.6));
+    añadirHist(actual);
     mostrarMsg('📋 Copiado. Pégalo en Excel con ⌘V.','ok');
   }
   catch(e){ mostrarMsg('No se pudo copiar al portapapeles. Usa “Descargar PNG” e inserta la imagen en Excel (Insertar ▸ Imagen).','err'); }
@@ -433,6 +479,7 @@ async function descargarActual(){
     const a=document.createElement('a'); a.href=url; a.download=nombre;
     document.body.appendChild(a); a.click(); a.remove();
     if(revoca) setTimeout(()=>URL.revokeObjectURL(url),1500);
+    añadirHist(actual);
   }catch(e){ mostrarMsg('No se pudo generar el PNG.','err'); }
 }
 
@@ -483,6 +530,111 @@ function mkCanvas(W,H,SCALE){
   ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
   return {canvas, ctx};
 }
+
+// ===== Mejorar foto (sin IA) =====
+let _fotoCache={key:null, canvas:null};
+function fotoOpts(){
+  const g=(id,d)=> ($(id)? parseFloat($(id).value) : d);
+  return { brillo:g('fBrillo',1), contraste:g('fContraste',1), sat:g('fSat',1), nitidez:g('fNitidez',0) };
+}
+function fotoLista(){
+  if(!fotoActual) return null;
+  const k=JSON.stringify(fotoOpts());
+  if(_fotoCache.key===k && _fotoCache.canvas) return _fotoCache.canvas;
+  const c=mejorarFoto(fotoActual.img);
+  _fotoCache={key:k, canvas:c};
+  return c;
+}
+function mejorarFoto(img){
+  const o=fotoOpts();
+  const iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
+  const maxDim=700, s=Math.min(1, maxDim/Math.max(iw,ih));
+  const w=Math.max(1,Math.round(iw*s)), h=Math.max(1,Math.round(ih*s));
+  const c=document.createElement('canvas'); c.width=w; c.height=h;
+  const ctx=c.getContext('2d');
+  ctx.filter='brightness('+o.brillo+') contrast('+o.contraste+') saturate('+o.sat+')';
+  ctx.drawImage(img,0,0,w,h);
+  ctx.filter='none';
+  if(o.nitidez>0) aplicarNitidez(ctx,w,h,o.nitidez/100);
+  return c;
+}
+function aplicarNitidez(ctx,w,h,amt){
+  let src; try{ src=ctx.getImageData(0,0,w,h); }catch(e){ return; }
+  const out=ctx.createImageData(w,h), S=src.data, D=out.data;
+  const a=amt*1.2, c0=1+4*a, cn=-a;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const i=(y*w+x)*4;
+    for(let ch=0;ch<3;ch++){
+      let v=c0*S[i+ch]
+        + cn*S[(y*w+(x>0?x-1:x))*4+ch]
+        + cn*S[(y*w+(x<w-1?x+1:x))*4+ch]
+        + cn*S[((y>0?y-1:y)*w+x)*4+ch]
+        + cn*S[((y<h-1?y+1:y)*w+x)*4+ch];
+      D[i+ch]= v<0?0:(v>255?255:v);
+    }
+    D[i+3]=S[i+3];
+  }
+  ctx.putImageData(out,0,0);
+}
+function redibujarFoto(){ _fotoCache.key=null; if(ultimo) ultimo.fotoImg=fotoLista(); redibujar(); }
+function sincVistaFoto(){
+  if($('vBri')) $('vBri').textContent=(+$('fBrillo').value).toFixed(2);
+  if($('vCon')) $('vCon').textContent=(+$('fContraste').value).toFixed(2);
+  if($('vSat')) $('vSat').textContent=(+$('fSat').value).toFixed(2);
+  if($('vNit')) $('vNit').textContent=$('fNitidez').value;
+}
+function autoFoto(){ $('fBrillo').value=1.05; $('fContraste').value=1.18; $('fSat').value=1.12; $('fNitidez').value=45; sincVistaFoto(); redibujarFoto(); }
+function resetFoto(){ $('fBrillo').value=1; $('fContraste').value=1; $('fSat').value=1; $('fNitidez').value=0; sincVistaFoto(); redibujarFoto(); }
+
+// ===== Historial (se guarda en el navegador) =====
+const HKEY='gcb_hist', LKEY='gcb_lista';
+let historial=[];
+function cargarHist(){ try{ historial=JSON.parse(localStorage.getItem(HKEY)||'[]'); }catch(e){ historial=[]; } }
+function guardarHist(){
+  try{ localStorage.setItem(HKEY, JSON.stringify(historial)); }
+  catch(e){ while(historial.length>1){ historial.pop(); try{ localStorage.setItem(HKEY, JSON.stringify(historial)); return; }catch(_){} } }
+}
+function guardarLista(){ try{ localStorage.setItem(LKEY, JSON.stringify(lista)); }catch(e){} }
+function cargarLista(){ try{ const l=JSON.parse(localStorage.getItem(LKEY)||'[]'); if(Array.isArray(l)) lista=l; }catch(e){} }
+function añadirHist(it){
+  if(!it || !it.codigo13) return;
+  const e={ id:String(Date.now())+'_'+Math.floor(performance.now()), ts:Date.now(), codigo13:it.codigo13, nombre:it.nombre||'', pngURL:it.pngURL||null };
+  const top=historial[0];
+  if(top && top.codigo13===e.codigo13 && top.pngURL===e.pngURL) return;
+  historial.unshift(e);
+  if(historial.length>30) historial=historial.slice(0,30);
+  guardarHist(); renderHist();
+}
+function fechaCorta(ts){ const d=new Date(ts); return d.toLocaleDateString()+' '+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
+function renderHist(){
+  const g=$('histGrid'); if(!g) return;
+  $('contHist').textContent=historial.length;
+  if(!historial.length){ g.innerHTML='<div class="vacio">Aún no hay historial.</div>'; return; }
+  g.innerHTML=historial.map(e=>{
+    const cuerpo = e.pngURL ? `<img src="${e.pngURL}" style="width:100%; display:block;">` : svgEAN13(e.codigo13,1.2);
+    const nom = e.nombre? `<div class="nom">${escapeHtml(e.nombre)}</div>`:'';
+    return `<div class="etiqueta">${nom}${cuerpo}
+      <div style="display:flex; gap:4px; justify-content:center; margin-top:4px; flex-wrap:wrap;">
+        <button class="btn-gris" style="padding:4px 8px; font-size:12px;" onclick="copiarHist('${e.id}')" title="Copiar">📋</button>
+        <button class="btn-gris" style="padding:4px 8px; font-size:12px;" onclick="descargarHist('${e.id}')" title="Descargar">⬇️</button>
+        <button class="btn-gris" style="padding:4px 8px; font-size:12px;" onclick="aHojaHist('${e.id}')" title="A la hoja">➕</button>
+        <button class="btn-gris" style="padding:4px 8px; font-size:12px;" onclick="quitarHist('${e.id}')" title="Quitar">🗑️</button>
+      </div>
+      <div class="hint" style="text-align:center; margin-top:2px;">${e.codigo13} · ${fechaCorta(e.ts)}</div>
+    </div>`;
+  }).join('');
+}
+function findHist(id){ return historial.find(e=>e.id===id); }
+async function copiarHist(id){ const e=findHist(id); if(!e) return; try{ if(e.pngURL) await copiarPNGUrl(e.pngURL); else await copiarSVG(svgEAN13(e.codigo13,2.6)); toast('📋 Copiado (⌘V)'); }catch(_){ toast('No se pudo copiar.'); } }
+async function descargarHist(id){ const e=findHist(id); if(!e) return; try{
+  let url, revoca=false; const nombre=e.codigo13+(e.pngURL?'_foto':'')+'.png';
+  if(e.pngURL) url=e.pngURL; else { const blob=await svgAPng(svgEAN13(e.codigo13,2.6),4); url=URL.createObjectURL(blob); revoca=true; }
+  const a=document.createElement('a'); a.href=url; a.download=nombre; document.body.appendChild(a); a.click(); a.remove();
+  if(revoca) setTimeout(()=>URL.revokeObjectURL(url),1500);
+}catch(_){ toast('No se pudo descargar.'); } }
+function aHojaHist(id){ const e=findHist(id); if(!e) return; lista.push({codigo13:e.codigo13, nombre:e.nombre, fotoSrc:null, pngURL:e.pngURL}); renderHoja(); toast('➕ Agregado a la hoja'); }
+function quitarHist(id){ historial=historial.filter(e=>e.id!==id); guardarHist(); renderHist(); }
+function vaciarHist(){ if(historial.length && confirm('¿Vaciar todo el historial?')){ historial=[]; guardarHist(); renderHist(); } }
 function recorta(ctx, txt, maxW){
   if(ctx.measureText(txt).width<=maxW) return txt;
   let t=txt;
@@ -556,6 +708,7 @@ function setFotoArchivo(f){
     const im=new Image();
     im.onload=()=>{
       fotoActual={img:im, src:reader.result};
+      _fotoCache={key:null, canvas:null};
       const mini=$('fotoMini'); if(mini){ mini.src=reader.result; mini.style.display=''; }
       const txt=$('dropTxt'); if(txt) txt.style.display='none';
       $('btnQuitarFoto').style.display='';
@@ -568,6 +721,7 @@ function setFotoArchivo(f){
 function cargarFoto(e){ const f=e.target.files && e.target.files[0]; if(f) setFotoArchivo(f); }
 function quitarFoto(){
   fotoActual=null;
+  _fotoCache={key:null, canvas:null};
   const fi=$('foto'); if(fi) fi.value='';
   const mini=$('fotoMini'); if(mini){ mini.style.display='none'; mini.src=''; }
   const txt=$('dropTxt'); if(txt) txt.style.display='';
@@ -613,6 +767,12 @@ $('codigo').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.shiftKey?agr
 $('nombre').addEventListener('keydown', e=>{ if(e.key==='Enter'){ agregarHoja(); }});
 // Solo dígitos en el código
 $('codigo').addEventListener('input', e=>{ e.target.value=e.target.value.replace(/\D/g,''); });
+
+// ---- Carga inicial: recuperar hoja e historial guardados ----
+cargarHist();
+cargarLista();
+renderHist();
+renderHoja();
 </script>
 </body>
 </html>
