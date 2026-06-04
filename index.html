@@ -110,10 +110,18 @@
         <input type="text" id="nombre" class="nombre" placeholder="Ej. Hebilla negra mediana">
       </div>
     </div>
+    <div class="row" style="margin-top:14px; align-items:center;">
+      <div class="campo" style="flex:2;">
+        <label>Foto del producto (opcional)</label>
+        <input type="file" id="foto" accept="image/*" onchange="cargarFoto(event)">
+      </div>
+      <button class="btn-gris" type="button" id="btnQuitarFoto" onclick="quitarFoto()" style="display:none;">Quitar foto</button>
+    </div>
     <div class="row" style="margin-top:14px;">
-      <button class="btn-azul" onclick="generar()">Generar barra</button>
+      <button class="btn-azul" onclick="generar()">Generar</button>
       <button class="btn-verde" onclick="agregarHoja()">➕ Agregar a la hoja</button>
     </div>
+    <p class="hint">Sin foto sale solo la barra (como antes). Con foto sale un PNG con la foto + la barra (+ nombre).</p>
     <div id="msg" class="msg"></div>
   </div>
 
@@ -246,7 +254,8 @@ function svgEAN13(codigo13, moduloPx){
 }
 
 // ===== UI =====
-let actual = null; // {codigo13, nombre}
+let actual = null;      // {codigo13, nombre, fotoSrc, pngURL}
+let fotoActual = null;  // {img, src} foto cargada
 const $ = id => document.getElementById(id);
 
 function mostrarMsg(texto, tipo){
@@ -254,24 +263,35 @@ function mostrarMsg(texto, tipo){
   if(!texto) m.className='msg';
 }
 
-function generar(){
+async function generar(){
   const r = normalizar($('codigo').value);
-  if(!r.ok){ mostrarMsg(r.error,'err'); $('preview').innerHTML='<div class="vacio">Corrige el código.</div>'; actual=null; return; }
-  actual = {codigo13:r.codigo13, nombre:$('nombre').value.trim()};
-  $('preview').innerHTML = svgEAN13(r.codigo13, 2.4);
+  if(!r.ok){ mostrarMsg(r.error,'err'); $('preview').innerHTML='<div class="vacio">Corrige el código.</div>'; actual=null; return null; }
+  const nombre = $('nombre').value.trim();
+  if(fotoActual){
+    const cv = await componer(r.codigo13, nombre, fotoActual.img);
+    const pngURL = cv.toDataURL('image/png');
+    actual = {codigo13:r.codigo13, nombre, fotoSrc:fotoActual.src, pngURL};
+    $('preview').innerHTML = `<img src="${pngURL}" style="max-width:100%;">`;
+  } else {
+    actual = {codigo13:r.codigo13, nombre, fotoSrc:null, pngURL:null};
+    $('preview').innerHTML = svgEAN13(r.codigo13, 2.4);
+  }
   if(r.warn) mostrarMsg(r.warn,'warn');
   else if(r.nota) mostrarMsg('✅ '+r.codigo13+' — '+r.nota,'ok');
   else mostrarMsg('✅ Código válido: '+r.codigo13,'ok');
+  return actual;
 }
 
 let lista = [];
-function agregarHoja(){
-  generar();
-  if(!actual) return;
-  lista.push({...actual});
+async function agregarHoja(){
+  const a = await generar();
+  if(!a) return;
+  lista.push({codigo13:a.codigo13, nombre:a.nombre, fotoSrc:a.fotoSrc, pngURL:a.pngURL});
   renderHoja();
   // limpiar para el siguiente
-  $('codigo').value=''; $('nombre').value=''; $('codigo').focus();
+  $('codigo').value=''; $('nombre').value='';
+  quitarFoto();
+  $('codigo').focus();
 }
 
 function renderHoja(){
@@ -287,8 +307,9 @@ function renderHoja(){
   const verNom = $('verNombre').checked;
   hoja.style.gridTemplateColumns=`repeat(${cols},1fr)`;
   hoja.innerHTML = lista.map((it,idx)=>{
-    const nom = (verNom && it.nombre) ? `<div class="nom">${escapeHtml(it.nombre)}</div>` : '';
-    return `<div class="etiqueta"><button class="copiar no-print" onclick="copiarLabel(${idx})" title="Copiar barra para Excel">📋</button><button class="quitar no-print" onclick="quitar(${idx})" title="Quitar">×</button>${nom}${svgEAN13(it.codigo13, mw)}</div>`;
+    const nom = (verNom && it.nombre && !it.pngURL) ? `<div class="nom">${escapeHtml(it.nombre)}</div>` : '';
+    const cuerpo = it.pngURL ? `<img src="${it.pngURL}" style="width:100%; display:block;">` : svgEAN13(it.codigo13, mw);
+    return `<div class="etiqueta"><button class="copiar no-print" onclick="copiarLabel(${idx})" title="Copiar para Excel">📋</button><button class="quitar no-print" onclick="quitar(${idx})" title="Quitar">×</button>${nom}${cuerpo}</div>`;
   }).join('');
 }
 
@@ -331,28 +352,106 @@ function toast(texto){
 }
 
 async function copiarActual(){
-  if(!actual){ mostrarMsg('Primero genera una barra (botón “Generar barra”).','warn'); return; }
-  try{ await copiarSVG(svgEAN13(actual.codigo13, 2.6)); mostrarMsg('📋 Barra copiada. Pégala en Excel con ⌘V.','ok'); }
+  if(!actual){ mostrarMsg('Primero genera (botón “Generar”).','warn'); return; }
+  try{
+    if(actual.pngURL) await copiarPNGUrl(actual.pngURL);
+    else await copiarSVG(svgEAN13(actual.codigo13, 2.6));
+    mostrarMsg('📋 Copiado. Pégalo en Excel con ⌘V.','ok');
+  }
   catch(e){ mostrarMsg('No se pudo copiar al portapapeles. Usa “Descargar PNG” e inserta la imagen en Excel (Insertar ▸ Imagen).','err'); }
 }
 
 async function copiarLabel(i){
-  try{ await copiarSVG(svgEAN13(lista[i].codigo13, 2.6)); toast('📋 Barra copiada — pégala en Excel (⌘V)'); }
+  try{
+    const it=lista[i];
+    if(it.pngURL) await copiarPNGUrl(it.pngURL);
+    else await copiarSVG(svgEAN13(it.codigo13, 2.6));
+    toast('📋 Copiado — pégalo en Excel (⌘V)');
+  }
   catch(e){ toast('No se pudo copiar. Usa Descargar PNG.'); }
 }
 
 async function descargarActual(){
   if(!actual){ mostrarMsg('Primero genera una barra.','warn'); return; }
   try{
-    const blob=await svgAPng(svgEAN13(actual.codigo13, 2.6), 4);
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download=actual.codigo13+'.png';
+    let url, revoca=false;
+    const nombre = actual.codigo13 + (actual.pngURL?'_foto':'') + '.png';
+    if(actual.pngURL){ url=actual.pngURL; }
+    else { const blob=await svgAPng(svgEAN13(actual.codigo13, 2.6), 4); url=URL.createObjectURL(blob); revoca=true; }
+    const a=document.createElement('a'); a.href=url; a.download=nombre;
     document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),1500);
+    if(revoca) setTimeout(()=>URL.revokeObjectURL(url),1500);
   }catch(e){ mostrarMsg('No se pudo generar el PNG.','err'); }
 }
 
 function escapeHtml(s){ return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ===== Foto + composición (foto arriba, barra abajo, nombre opcional) =====
+function cargarImagen(src){
+  return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=()=>rej(new Error('imagen')); im.src=src; });
+}
+function svgEAN13ToImg(codigo13, mw){
+  return cargarImagen('data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svgEAN13(codigo13, mw)));
+}
+function recorta(ctx, txt, maxW){
+  if(ctx.measureText(txt).width<=maxW) return txt;
+  let t=txt;
+  while(t.length>1 && ctx.measureText(t+'…').width>maxW) t=t.slice(0,-1);
+  return t+'…';
+}
+async function componer(codigo13, nombre, fotoImg){
+  const SCALE=3, W=240, pad=12, innerW=W-2*pad, gap=8;
+  const barImg = await svgEAN13ToImg(codigo13, 4);
+  const bw=barImg.naturalWidth||barImg.width, bh=barImg.naturalHeight||barImg.height;
+  const barH = innerW * (bh/bw);
+  let fW=0, fH=0;
+  if(fotoImg){
+    const iw=fotoImg.naturalWidth||fotoImg.width, ih=fotoImg.naturalHeight||fotoImg.height;
+    const s=Math.min(innerW/iw, innerW/ih);   // cabe en un cuadro innerW×innerW
+    fW=iw*s; fH=ih*s;
+  }
+  const nameH = nombre?18:0;
+  const H = pad + (nombre?nameH+gap:0) + (fotoImg?fH+gap:0) + barH + pad;
+  const cv=document.createElement('canvas');
+  cv.width=Math.round(W*SCALE); cv.height=Math.round(H*SCALE);
+  const ctx=cv.getContext('2d'); ctx.scale(SCALE,SCALE);
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
+  let y=pad;
+  if(nombre){
+    ctx.fillStyle='#111'; ctx.font='bold 12px -apple-system,Arial,sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.fillText(recorta(ctx,nombre,innerW), W/2, y); y+=nameH+gap;
+  }
+  if(fotoImg){
+    ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+    ctx.drawImage(fotoImg,(W-fW)/2,y,fW,fH); y+=fH+gap;
+  }
+  ctx.imageSmoothingEnabled=false;            // barra nítida
+  ctx.drawImage(barImg, pad, y, innerW, barH);
+  return cv;
+}
+async function dataURLaBlob(u){ const r=await fetch(u); return await r.blob(); }
+async function copiarPNGUrl(u){
+  if(!(navigator.clipboard && window.ClipboardItem)) throw new Error('clipboard no disponible');
+  const blob=await dataURLaBlob(u);
+  await navigator.clipboard.write([ new ClipboardItem({'image/png': blob}) ]);
+}
+function cargarFoto(e){
+  const f=e.target.files && e.target.files[0]; if(!f) return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    const im=new Image();
+    im.onload=()=>{ fotoActual={img:im, src:reader.result}; $('btnQuitarFoto').style.display=''; if($('codigo').value) generar(); };
+    im.src=reader.result;
+  };
+  reader.readAsDataURL(f);
+}
+function quitarFoto(){
+  fotoActual=null;
+  const fi=$('foto'); if(fi) fi.value='';
+  const b=$('btnQuitarFoto'); if(b) b.style.display='none';
+  if($('codigo').value) generar();
+}
 
 // Enter para generar / agregar
 $('codigo').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.shiftKey?agregarHoja():generar(); }});
