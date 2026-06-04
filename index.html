@@ -310,6 +310,7 @@ async function generar(){
   if(!r.ok){ mostrarMsg(r.error,'err'); $('preview').innerHTML='<div class="vacio">Corrige el código.</div>'; actual=null; return null; }
   const nombre = $('nombre').value.trim();
   if(fotoActual){
+    ultimo = {codigo13:r.codigo13, nombre, fotoImg:fotoActual.img};
     const cv = await componer(r.codigo13, nombre, fotoActual.img);
     const pngURL = cv.toDataURL('image/png');
     actual = {codigo13:r.codigo13, nombre, fotoSrc:fotoActual.src, pngURL};
@@ -435,7 +436,28 @@ function cargarImagen(src){
 function svgEAN13ToImg(codigo13, mw, alto){
   return cargarImagen('data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svgEAN13(codigo13, mw, alto)));
 }
-function redibujar(){ if($('codigo').value) generar(); }
+let ultimo=null; // {codigo13, nombre, fotoImg} — para redibujar al mover los controles aunque el campo esté vacío
+async function redibujar(){
+  if($('codigo').value){ await generar(); return; }
+  if(ultimo){
+    const cv=await componer(ultimo.codigo13, ultimo.nombre, ultimo.fotoImg);
+    const pngURL=cv.toDataURL('image/png');
+    if(actual) actual.pngURL=pngURL;
+    $('preview').innerHTML=`<img src="${pngURL}" style="max-width:100%;">`;
+  }
+}
+function envolver(ctx, txt, maxW){
+  const palabras=String(txt).split(/\s+/).filter(Boolean);
+  if(!palabras.length) return [];
+  const lineas=[]; let linea=palabras[0];
+  for(let i=1;i<palabras.length;i++){
+    const w=palabras[i];
+    if(ctx.measureText(linea+' '+w).width<=maxW) linea+=' '+w;
+    else { lineas.push(linea); linea=w; }
+  }
+  lineas.push(linea);
+  return lineas;
+}
 function opts(){
   const g=(id,d)=> ($(id)? $(id).value : d);
   return {
@@ -465,18 +487,25 @@ async function componer(codigo13, nombre, fotoImg){
   const ratio=bh/bw;
   const horizontal=(o.pos==='izquierda'||o.pos==='derecha');
   const fuente='bold '+o.txt+'px -apple-system,Arial,sans-serif';
+  const lineH=o.txt+4;
+  const mctx=document.createElement('canvas').getContext('2d'); mctx.font=fuente;
+  const dibujarTexto=(ctx,lineas,cx,y)=>{
+    ctx.fillStyle='#111'; ctx.font=fuente; ctx.textAlign='center'; ctx.textBaseline='top';
+    lineas.forEach(l=>{ ctx.fillText(l, cx, y); y+=lineH; });
+  };
 
   if(!horizontal){
-    // Apilado vertical (foto arriba o abajo)
+    // Apilado vertical (foto arriba o abajo). El texto salta de línea si es largo.
     const W=240, innerW=W-2*pad;
     const barW=innerW*o.barFrac, barH=barW*ratio;
     let fW=0,fH=0;
     if(fotoImg){ const iw=fotoImg.naturalWidth||fotoImg.width, ih=fotoImg.naturalHeight||fotoImg.height; const s=Math.min(innerW/iw, innerW/ih); fW=iw*s; fH=ih*s; }
-    const nameH = nombre?(o.txt+gap):0;
+    const lineas = nombre? envolver(mctx, nombre, innerW) : [];
+    const nameH = lineas.length ? lineas.length*lineH + gap : 0;
     const H = pad + nameH + (fotoImg?fH+gap:0) + barH + pad;
     const {canvas,ctx}=mkCanvas(W,H,SCALE);
     let y=pad;
-    if(nombre){ ctx.fillStyle='#111'; ctx.font=fuente; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(recorta(ctx,nombre,innerW), W/2, y); y+=nameH; }
+    if(lineas.length){ dibujarTexto(ctx, lineas, W/2, y); y+=nameH; }
     const dFoto=()=>{ if(fotoImg){ ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high'; ctx.drawImage(fotoImg,(W-fW)/2,y,fW,fH); y+=fH+gap; } };
     const dBar =()=>{ ctx.imageSmoothingEnabled=false; ctx.drawImage(barImg,(W-barW)/2,y,barW,barH); y+=barH; };
     if(o.pos==='abajo'){ dBar(); y+=gap; dFoto(); } else { dFoto(); dBar(); }
@@ -487,7 +516,8 @@ async function componer(codigo13, nombre, fotoImg){
     let fW=0,fH=0;
     if(fotoImg){ const iw=fotoImg.naturalWidth||fotoImg.width, ih=fotoImg.naturalHeight||fotoImg.height; const s=Math.min(photoMax/iw, photoMax/ih); fW=iw*s; fH=ih*s; }
     const barW=contentW*o.barFrac, barH=barW*ratio;
-    const nameH = nombre?(o.txt+gap):0;
+    const lineas = nombre? envolver(mctx, nombre, contentW) : [];
+    const nameH = lineas.length ? lineas.length*lineH + gap : 0;
     const contentH=nameH+barH;
     const H=pad*2+Math.max(fH, contentH);
     const W=pad*2 + (fotoImg?fW+colGap:0) + contentW;
@@ -497,7 +527,7 @@ async function componer(codigo13, nombre, fotoImg){
     else { cx0=pad; fx=pad+contentW+colGap; }
     if(fotoImg){ ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high'; ctx.drawImage(fotoImg,fx,(H-fH)/2,fW,fH); }
     let cy=(H-contentH)/2;
-    if(nombre){ ctx.fillStyle='#111'; ctx.font=fuente; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(recorta(ctx,nombre,contentW), cx0+contentW/2, cy); cy+=nameH; }
+    if(lineas.length){ dibujarTexto(ctx, lineas, cx0+contentW/2, cy); cy+=nameH; }
     ctx.imageSmoothingEnabled=false; ctx.drawImage(barImg, cx0+(contentW-barW)/2, cy, barW, barH);
     return canvas;
   }
