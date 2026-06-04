@@ -493,8 +493,13 @@ function quitarFoto(){
 
 // ---- Jalar fotos: pegar con ⌘V ----
 document.addEventListener('paste', e=>{
-  const items=(e.clipboardData||{}).items||[];
-  for(const it of items){
+  const cd=e.clipboardData; if(!cd) return;
+  const ae=document.activeElement;
+  const enCampo = ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.isContentEditable);
+  const texto = (cd.getData && cd.getData('text/plain')) || '';
+  // Si estás en un campo de texto y hay texto (ej. el código), dejar pegar el texto normal.
+  if(enCampo && texto.trim() !== '') return;
+  for(const it of cd.items||[]){
     if(it.type && it.type.startsWith('image/')){
       const f=it.getAsFile(); if(f){ setFotoArchivo(f); toast('📷 Foto pegada'); e.preventDefault(); }
       break;
