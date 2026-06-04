@@ -151,6 +151,35 @@
     </div>
   </div>
 
+  <!-- DISEÑO DE LA ETIQUETA (con foto) -->
+  <div class="panel no-print">
+    <label>Diseño de la etiqueta (cuando hay foto)</label>
+    <div class="controles" style="margin-top:8px;">
+      <div class="campo">
+        <label>Posición de la foto</label>
+        <select id="fotoPos" onchange="redibujar()">
+          <option value="arriba" selected>Arriba</option>
+          <option value="abajo">Abajo</option>
+          <option value="izquierda">Izquierda</option>
+          <option value="derecha">Derecha</option>
+        </select>
+      </div>
+      <div class="campo">
+        <label>Tamaño de texto · <span id="vTxt">12</span></label>
+        <input type="range" id="txtSize" min="8" max="30" value="12" oninput="$('vTxt').textContent=this.value; redibujar()">
+      </div>
+      <div class="campo">
+        <label>Tamaño de barra · <span id="vBar">85</span>%</label>
+        <input type="range" id="barSize" min="45" max="100" value="85" oninput="$('vBar').textContent=this.value; redibujar()">
+      </div>
+      <div class="campo">
+        <label>Alto de barra · <span id="vAlt">45</span></label>
+        <input type="range" id="barAlto" min="22" max="75" value="45" oninput="$('vAlt').textContent=this.value; redibujar()">
+      </div>
+    </div>
+    <p class="hint">Estos controles aplican a la imagen con foto. “Alto de barra” bajo = barra menos alta.</p>
+  </div>
+
   <!-- HOJA DE IMPRESIÓN -->
   <div class="panel">
     <div class="hoja-head no-print">
@@ -214,8 +243,9 @@ function normalizar(entrada){
 }
 
 // Construye el SVG de la barra para un código de 13 dígitos válido
-function svgEAN13(codigo13, moduloPx){
+function svgEAN13(codigo13, moduloPx, altoModulos){
   const mw = moduloPx;
+  const am = altoModulos || 68;
   const d = codigo13.split('').map(Number);
   const primer = d[0];
   const pat = PARIDAD[primer];
@@ -230,7 +260,7 @@ function svgEAN13(codigo13, moduloPx){
 
   const qzL=11, qzR=7;
   const totalMod = qzL + bits.length + qzR;          // 11+95+7 = 113
-  const altBarra = Math.round(mw*68);                 // alto de barras de datos
+  const altBarra = Math.round(mw*am);                 // alto de barras de datos
   const extra = Math.round(mw*9);                     // las guardas bajan más
   const margenTexto = Math.round(mw*11);
   const W = totalMod*mw;
@@ -402,8 +432,25 @@ function escapeHtml(s){ return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','
 function cargarImagen(src){
   return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=()=>rej(new Error('imagen')); im.src=src; });
 }
-function svgEAN13ToImg(codigo13, mw){
-  return cargarImagen('data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svgEAN13(codigo13, mw)));
+function svgEAN13ToImg(codigo13, mw, alto){
+  return cargarImagen('data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svgEAN13(codigo13, mw, alto)));
+}
+function redibujar(){ if($('codigo').value) generar(); }
+function opts(){
+  const g=(id,d)=> ($(id)? $(id).value : d);
+  return {
+    pos: g('fotoPos','arriba'),
+    txt: parseInt(g('txtSize',12),10),
+    barFrac: parseInt(g('barSize',85),10)/100,
+    barAlto: parseInt(g('barAlto',45),10)
+  };
+}
+function mkCanvas(W,H,SCALE){
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.round(W*SCALE); canvas.height=Math.round(H*SCALE);
+  const ctx=canvas.getContext('2d'); ctx.scale(SCALE,SCALE);
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
+  return {canvas, ctx};
 }
 function recorta(ctx, txt, maxW){
   if(ctx.measureText(txt).width<=maxW) return txt;
@@ -412,35 +459,48 @@ function recorta(ctx, txt, maxW){
   return t+'…';
 }
 async function componer(codigo13, nombre, fotoImg){
-  const SCALE=3, W=240, pad=12, innerW=W-2*pad, gap=8;
-  const barImg = await svgEAN13ToImg(codigo13, 4);
+  const o=opts(), SCALE=3, pad=12, gap=8;
+  const barImg = await svgEAN13ToImg(codigo13, 4, o.barAlto);
   const bw=barImg.naturalWidth||barImg.width, bh=barImg.naturalHeight||barImg.height;
-  const barH = innerW * (bh/bw);
-  let fW=0, fH=0;
-  if(fotoImg){
-    const iw=fotoImg.naturalWidth||fotoImg.width, ih=fotoImg.naturalHeight||fotoImg.height;
-    const s=Math.min(innerW/iw, innerW/ih);   // cabe en un cuadro innerW×innerW
-    fW=iw*s; fH=ih*s;
+  const ratio=bh/bw;
+  const horizontal=(o.pos==='izquierda'||o.pos==='derecha');
+  const fuente='bold '+o.txt+'px -apple-system,Arial,sans-serif';
+
+  if(!horizontal){
+    // Apilado vertical (foto arriba o abajo)
+    const W=240, innerW=W-2*pad;
+    const barW=innerW*o.barFrac, barH=barW*ratio;
+    let fW=0,fH=0;
+    if(fotoImg){ const iw=fotoImg.naturalWidth||fotoImg.width, ih=fotoImg.naturalHeight||fotoImg.height; const s=Math.min(innerW/iw, innerW/ih); fW=iw*s; fH=ih*s; }
+    const nameH = nombre?(o.txt+gap):0;
+    const H = pad + nameH + (fotoImg?fH+gap:0) + barH + pad;
+    const {canvas,ctx}=mkCanvas(W,H,SCALE);
+    let y=pad;
+    if(nombre){ ctx.fillStyle='#111'; ctx.font=fuente; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(recorta(ctx,nombre,innerW), W/2, y); y+=nameH; }
+    const dFoto=()=>{ if(fotoImg){ ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high'; ctx.drawImage(fotoImg,(W-fW)/2,y,fW,fH); y+=fH+gap; } };
+    const dBar =()=>{ ctx.imageSmoothingEnabled=false; ctx.drawImage(barImg,(W-barW)/2,y,barW,barH); y+=barH; };
+    if(o.pos==='abajo'){ dBar(); y+=gap; dFoto(); } else { dFoto(); dBar(); }
+    return canvas;
+  } else {
+    // Lado a lado (foto a la izquierda o derecha)
+    const photoMax=150, contentW=200, colGap=12;
+    let fW=0,fH=0;
+    if(fotoImg){ const iw=fotoImg.naturalWidth||fotoImg.width, ih=fotoImg.naturalHeight||fotoImg.height; const s=Math.min(photoMax/iw, photoMax/ih); fW=iw*s; fH=ih*s; }
+    const barW=contentW*o.barFrac, barH=barW*ratio;
+    const nameH = nombre?(o.txt+gap):0;
+    const contentH=nameH+barH;
+    const H=pad*2+Math.max(fH, contentH);
+    const W=pad*2 + (fotoImg?fW+colGap:0) + contentW;
+    const {canvas,ctx}=mkCanvas(W,H,SCALE);
+    let fx, cx0;
+    if(o.pos==='izquierda'){ fx=pad; cx0=pad+(fotoImg?fW+colGap:0); }
+    else { cx0=pad; fx=pad+contentW+colGap; }
+    if(fotoImg){ ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high'; ctx.drawImage(fotoImg,fx,(H-fH)/2,fW,fH); }
+    let cy=(H-contentH)/2;
+    if(nombre){ ctx.fillStyle='#111'; ctx.font=fuente; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(recorta(ctx,nombre,contentW), cx0+contentW/2, cy); cy+=nameH; }
+    ctx.imageSmoothingEnabled=false; ctx.drawImage(barImg, cx0+(contentW-barW)/2, cy, barW, barH);
+    return canvas;
   }
-  const nameH = nombre?18:0;
-  const H = pad + (nombre?nameH+gap:0) + (fotoImg?fH+gap:0) + barH + pad;
-  const cv=document.createElement('canvas');
-  cv.width=Math.round(W*SCALE); cv.height=Math.round(H*SCALE);
-  const ctx=cv.getContext('2d'); ctx.scale(SCALE,SCALE);
-  ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
-  let y=pad;
-  if(nombre){
-    ctx.fillStyle='#111'; ctx.font='bold 12px -apple-system,Arial,sans-serif';
-    ctx.textAlign='center'; ctx.textBaseline='top';
-    ctx.fillText(recorta(ctx,nombre,innerW), W/2, y); y+=nameH+gap;
-  }
-  if(fotoImg){
-    ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
-    ctx.drawImage(fotoImg,(W-fW)/2,y,fW,fH); y+=fH+gap;
-  }
-  ctx.imageSmoothingEnabled=false;            // barra nítida
-  ctx.drawImage(barImg, pad, y, innerW, barH);
-  return cv;
 }
 async function dataURLaBlob(u){ const r=await fetch(u); return await r.blob(); }
 async function copiarPNGUrl(u){
