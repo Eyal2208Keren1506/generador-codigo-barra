@@ -76,6 +76,14 @@
     font-size:14px; opacity:0; pointer-events:none; transition:opacity .2s; z-index:999;
   }
   #toast.show{opacity:1;}
+  .dropzone{
+    border:2px dashed var(--borde); border-radius:8px; padding:14px; text-align:center;
+    color:#666; cursor:pointer; font-size:13px; transition:.15s; min-height:56px;
+    display:flex; align-items:center; justify-content:center; gap:10px;
+  }
+  .dropzone:hover{border-color:var(--azul); color:var(--azul);}
+  .dropzone.dragover{border-color:var(--verde); background:#e8f5e9; color:var(--verde); transform:scale(1.01);}
+  .dropzone img{max-height:84px; border-radius:5px; border:1px solid #ddd;}
   .vacio{text-align:center; color:#999; padding:30px; font-size:14px;}
   svg{display:block; margin:0 auto;}
   .hint{font-size:12px; color:#777; margin-top:8px;}
@@ -113,7 +121,11 @@
     <div class="row" style="margin-top:14px; align-items:center;">
       <div class="campo" style="flex:2;">
         <label>Foto del producto (opcional)</label>
-        <input type="file" id="foto" accept="image/*" onchange="cargarFoto(event)">
+        <div id="dropZone" class="dropzone" onclick="$('foto').click()">
+          <span id="dropTxt">📷 Arrastra una foto aquí · pega con ⌘V · o haz clic para elegir</span>
+          <img id="fotoMini" style="display:none;" alt="">
+        </div>
+        <input type="file" id="foto" accept="image/*" style="display:none;" onchange="cargarFoto(event)">
       </div>
       <button class="btn-gris" type="button" id="btnQuitarFoto" onclick="quitarFoto()" style="display:none;">Quitar foto</button>
     </div>
@@ -436,22 +448,59 @@ async function copiarPNGUrl(u){
   const blob=await dataURLaBlob(u);
   await navigator.clipboard.write([ new ClipboardItem({'image/png': blob}) ]);
 }
-function cargarFoto(e){
-  const f=e.target.files && e.target.files[0]; if(!f) return;
+function setFotoArchivo(f){
+  if(!f || !(f.type||'').startsWith('image/')){ toast('Eso no es una imagen.'); return; }
   const reader=new FileReader();
   reader.onload=()=>{
     const im=new Image();
-    im.onload=()=>{ fotoActual={img:im, src:reader.result}; $('btnQuitarFoto').style.display=''; if($('codigo').value) generar(); };
+    im.onload=()=>{
+      fotoActual={img:im, src:reader.result};
+      const mini=$('fotoMini'); if(mini){ mini.src=reader.result; mini.style.display=''; }
+      const txt=$('dropTxt'); if(txt) txt.style.display='none';
+      $('btnQuitarFoto').style.display='';
+      if($('codigo').value) generar();
+    };
     im.src=reader.result;
   };
   reader.readAsDataURL(f);
 }
+function cargarFoto(e){ const f=e.target.files && e.target.files[0]; if(f) setFotoArchivo(f); }
 function quitarFoto(){
   fotoActual=null;
   const fi=$('foto'); if(fi) fi.value='';
+  const mini=$('fotoMini'); if(mini){ mini.style.display='none'; mini.src=''; }
+  const txt=$('dropTxt'); if(txt) txt.style.display='';
   const b=$('btnQuitarFoto'); if(b) b.style.display='none';
   if($('codigo').value) generar();
 }
+
+// ---- Jalar fotos: arrastrar / soltar ----
+(function(){
+  const dz=$('dropZone'); if(!dz) return;
+  ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); dz.classList.add('dragover'); }));
+  ['dragleave','dragend'].forEach(ev=>dz.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); dz.classList.remove('dragover'); }));
+  dz.addEventListener('drop', e=>{
+    e.preventDefault(); e.stopPropagation(); dz.classList.remove('dragover');
+    const dt=e.dataTransfer; if(!dt) return;
+    let f = dt.files && dt.files[0];
+    if(!f && dt.items){ for(const it of dt.items){ if(it.kind==='file'){ f=it.getAsFile(); break; } } }
+    if(f) setFotoArchivo(f); else toast('Arrastra un archivo de imagen.');
+  });
+  // Evitar que el navegador abra la imagen si la sueltan fuera de la zona
+  window.addEventListener('dragover', e=>e.preventDefault());
+  window.addEventListener('drop', e=>{ if(!dz.contains(e.target)) e.preventDefault(); });
+})();
+
+// ---- Jalar fotos: pegar con ⌘V ----
+document.addEventListener('paste', e=>{
+  const items=(e.clipboardData||{}).items||[];
+  for(const it of items){
+    if(it.type && it.type.startsWith('image/')){
+      const f=it.getAsFile(); if(f){ setFotoArchivo(f); toast('📷 Foto pegada'); e.preventDefault(); }
+      break;
+    }
+  }
+});
 
 // Enter para generar / agregar
 $('codigo').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.shiftKey?agregarHoja():generar(); }});
